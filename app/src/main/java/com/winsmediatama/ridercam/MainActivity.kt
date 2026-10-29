@@ -271,7 +271,7 @@ private fun RiderCamDashboard() {
             }
             SpeedometerDial(
                 speedKmh = gpsLocation?.let { if (it.hasSpeed()) it.speed * 3.6f else 0f } ?: 0f,
-                modifier = Modifier.align(Alignment.Center).fillMaxHeight(0.82f).aspectRatio(1f)
+                modifier = Modifier.align(Alignment.Center).fillMaxHeight(0.574f).aspectRatio(1f)
             )
         }
 
