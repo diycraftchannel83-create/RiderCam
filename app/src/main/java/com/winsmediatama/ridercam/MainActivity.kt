@@ -22,9 +22,11 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,6 +62,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -78,6 +83,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.coroutines.resume
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
 
 private val Night = Color(0xFF070B0D)
 private val Panel = Color(0xFF11191D)
@@ -223,8 +231,8 @@ private fun RiderCamDashboard() {
             ) { Text("R", color = Neon, fontSize = 29.sp, fontWeight = FontWeight.Black) }
             Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Rider", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
-                    Text("Cam", color = Neon, fontSize = 26.sp, fontWeight = FontWeight.Black)
+                    Text("Cam", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+                    Text("Rider", color = Neon, fontSize = 26.sp, fontWeight = FontWeight.Black)
                 }
                 Text("RIDE • RECORD • TRACK • ANALYZE", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
             }
@@ -260,6 +268,10 @@ private fun RiderCamDashboard() {
                 Text(if (recording) " REC" else " STANDBY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(" •  FHD", color = Muted, fontSize = 10.sp)
             }
+            SpeedometerDial(
+                speedKmh = gpsLocation?.let { if (it.hasSpeed()) it.speed * 3.6f else 0f } ?: 0f,
+                modifier = Modifier.align(Alignment.Center).fillMaxHeight(0.82f).aspectRatio(1f)
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -277,26 +289,16 @@ private fun RiderCamDashboard() {
             ) { Text("Kamera Depan", color = if (!rearCamera) Night else Color.White, fontSize = 12.sp) }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(
-                modifier = Modifier.weight(1f).background(Panel, RoundedCornerShape(16.dp)).padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Speed, contentDescription = null, tint = Neon, modifier = Modifier.size(18.dp))
-                    Text(" GPS SPEED", color = Muted, fontSize = 11.sp)
-                }
-                Text(gpsLocation?.let { if (it.hasSpeed()) "%.0f".format(Locale.US, it.speed * 3.6f) else "0" } ?: "--", color = Neon, fontSize = 44.sp, fontWeight = FontWeight.Black, lineHeight = 46.sp)
-                Text(if (gpsLocation == null) "km/h • menunggu GPS" else "km/h • GPS aktif", color = Muted, fontSize = 10.sp)
-            }
-            Column(
-                modifier = Modifier.weight(1f).background(Panel, RoundedCornerShape(16.dp)).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                TelemetryLine(Icons.Default.GpsFixed, "GPS", if (gpsLocation == null) "Mencari sinyal" else "Akurasi %.0f m".format(Locale.US, gpsLocation!!.accuracy))
-                TelemetryLine(Icons.Default.CameraAlt, "Kamera", if (rearCamera) "Belakang" else "Depan")
-                TelemetryLine(Icons.Default.Mic, "Ketinggian", gpsLocation?.let { if (it.hasAltitude()) "%.0f m".format(Locale.US, it.altitude) else "Tidak tersedia" } ?: "—")
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth().background(Color(0xE6000000), RoundedCornerShape(14.dp))
+                .border(1.dp, Color(0x553E4A4F), RoundedCornerShape(14.dp)).padding(vertical = 10.dp, horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TelemetryCell("JARAK", "%.2f km".format(Locale.US, tripDistanceMeters / 1000f), Icons.Default.GpsFixed, Modifier.weight(1f))
+            TelemetryCell("MAX SPEED", "%.0f km/h".format(Locale.US, maxSpeedKmh), Icons.Default.Speed, Modifier.weight(1f))
+            TelemetryCell("ALTITUDE", gpsLocation?.takeIf { it.hasAltitude() }?.let { "%.0f m".format(Locale.US, it.altitude) } ?: "— m", Icons.Default.GpsFixed, Modifier.weight(1f))
+            TelemetryCell("GPS", gpsLocation?.let { "±%.0f m".format(Locale.US, it.accuracy) } ?: "Mencari", Icons.Default.GpsFixed, Modifier.weight(1f))
         }
 
         Button(
@@ -314,9 +316,9 @@ private fun RiderCamDashboard() {
                         try {
                             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                             val values = ContentValues().apply {
-                                put(MediaStore.Video.Media.DISPLAY_NAME, "RiderCam_$stamp.mp4")
+                                put(MediaStore.Video.Media.DISPLAY_NAME, "CamRider_$stamp.mp4")
                                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/RiderCam")
+                                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CamRider")
                             }
                             val output = MediaStoreOutputOptions.Builder(
                                 context.contentResolver,
@@ -338,7 +340,7 @@ private fun RiderCamDashboard() {
                                         status = if (event.hasError()) {
                                             "Gagal menyelesaikan video (${event.error})"
                                         } else {
-                                            "Video tersimpan di Movies/RiderCam"
+                                            "Video tersimpan di Movies/CamRider"
                                         }
                                     }
                                 }
@@ -376,5 +378,74 @@ private fun TelemetryLine(icon: androidx.compose.ui.graphics.vector.ImageVector,
             Text(label, color = Muted, fontSize = 10.sp)
             Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+@Composable
+private fun SpeedometerDial(speedKmh: Float, modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val radius = min(size.width, size.height) * 0.48f
+            val center = androidx.compose.ui.geometry.Offset(cx, cy)
+            val dialRect = androidx.compose.ui.geometry.Offset(cx - radius * 0.86f, cy - radius * 0.86f)
+            val dialSize = androidx.compose.ui.geometry.Size(radius * 1.72f, radius * 1.72f)
+            drawCircle(Color(0xDD050708), radius, center)
+            drawCircle(Color(0xFF8C989D), radius, center, style = Stroke(radius * 0.025f))
+            drawArc(Neon, 135f, 172f, false, dialRect, dialSize, style = Stroke(radius * 0.065f))
+            drawArc(Color(0xFFFFA52C), 307f, 25f, false, dialRect, dialSize, style = Stroke(radius * 0.065f))
+            drawArc(Red, 332f, 63f, false, dialRect, dialSize, style = Stroke(radius * 0.065f))
+            for (i in 0..40) {
+                val angle = Math.toRadians(135.0 + i * 270.0 / 40.0)
+                val inner = radius * if (i % 4 == 0) 0.68f else 0.75f
+                val outer = radius * 0.82f
+                val p1 = androidx.compose.ui.geometry.Offset(cx + cos(angle).toFloat() * inner, cy + sin(angle).toFloat() * inner)
+                val p2 = androidx.compose.ui.geometry.Offset(cx + cos(angle).toFloat() * outer, cy + sin(angle).toFloat() * outer)
+                drawLine(if (i > 33) Red else Color.White, p1, p2, if (i % 4 == 0) radius * 0.018f else radius * 0.008f)
+                if (i % 4 == 0) {
+                    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = radius * 0.10f
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+                    }
+                    val tx = cx + cos(angle).toFloat() * radius * 0.56f
+                    val ty = cy + sin(angle).toFloat() * radius * 0.56f + radius * 0.035f
+                    drawContext.canvas.nativeCanvas.drawText((i * 5).toString(), tx, ty, paint)
+                }
+            }
+            val angle = Math.toRadians(135.0 + speedKmh.coerceIn(0f, 200f) / 200f * 270.0)
+            val tip = androidx.compose.ui.geometry.Offset(cx + cos(angle).toFloat() * radius * 0.58f, cy + sin(angle).toFloat() * radius * 0.58f)
+            val needle = Path().apply { moveTo(cx, cy); lineTo(tip.x, tip.y) }
+            drawPath(needle, Red, style = Stroke(radius * 0.03f))
+            drawCircle(Color(0xFFB8C1C4), radius * 0.075f, center)
+            drawCircle(Color(0xFF07090A), radius * 0.045f, center)
+        }
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp)
+                .background(Color(0xF0000000), RoundedCornerShape(14.dp))
+                .border(1.dp, Color(0x553E4A4F), RoundedCornerShape(14.dp))
+                .padding(horizontal = 18.dp, vertical = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("%.0f".format(Locale.US, speedKmh.coerceAtLeast(0f)), color = Color.White,
+                fontSize = 30.sp, fontWeight = FontWeight.Black, lineHeight = 32.sp)
+            Text("km/h", color = Muted, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun TelemetryCell(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.padding(horizontal = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, contentDescription = null, tint = Neon, modifier = Modifier.size(15.dp))
+        Text(value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1)
+        Text(label, color = Muted, fontSize = 8.sp, textAlign = TextAlign.Center, maxLines = 1)
     }
 }
