@@ -117,6 +117,7 @@ private fun RiderCamDashboard() {
     var cameraReady by remember { mutableStateOf(false) }
     var hasLocationPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) }
     var gpsLocation by remember { mutableStateOf<Location?>(null) }
+    var gpsAvailable by remember { mutableStateOf(false) }
     var tripDistanceMeters by remember { mutableStateOf(0f) }
     var maxSpeedKmh by remember { mutableStateOf(0f) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
