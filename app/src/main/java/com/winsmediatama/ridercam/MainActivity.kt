@@ -144,6 +144,13 @@ private fun RiderCamDashboard() {
         }
     }
 
+    LaunchedEffect(gpsLocation) {
+        while (true) {
+            gpsAvailable = gpsLocation?.let { System.currentTimeMillis() - it.time <= 5000L } == true
+            delay(1500L)
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (!hasPermissions || !hasLocationPermission) {
             permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
