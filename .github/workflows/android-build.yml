@@ -1,26 +1,61 @@
-name: Android Build
+name: RiderCam Android Build & Release
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
       - name: Build debug APK
         run: gradle assembleDebug
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk RiderCam-debug.apk
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiderCam-debug-apk
+          path: RiderCam-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ridercam-v0.1.${{ github.run_number }}
+          name: RiderCam v0.1.${{ github.run_number }}
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            RiderCam Android prototype build.
+
+            **Install type:** Debug APK for testing only; not a production-signed release.
+
+            **Current features:** CameraX preview and recording, front/rear camera selection, GPS speed, coordinates, altitude and approximate trip distance.
+
+            **Limitations:** GPS telemetry is not yet burned permanently into video. Automatic segmented recording and device-level 1080p/60 FPS validation are not yet complete. Video quality depends on the device camera capabilities.
+          files: RiderCam-debug.apk
