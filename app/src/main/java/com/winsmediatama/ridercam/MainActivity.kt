@@ -277,6 +277,8 @@ private fun RiderCamDashboard() {
                 Box(Modifier.size(8.dp).background(if (recording) Red else Muted, CircleShape))
                 Text(if (recording) " REC" else " STANDBY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(" •  FHD", color = Muted, fontSize = 10.sp)
+                Spacer(Modifier.size(8.dp))
+                Box(Modifier.size(10.dp).background(if (gpsAvailable) Neon else Red, CircleShape))
             }
             SpeedometerDial(
                 speedKmh = gpsLocation?.let { if (it.hasSpeed()) it.speed * 3.6f else 0f } ?: 0f,
