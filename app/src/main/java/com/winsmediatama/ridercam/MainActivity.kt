@@ -134,7 +134,7 @@ private fun RiderCamDashboard() {
     }
 
     LaunchedEffect(Unit) {
-        if (!hasPermissions) {
+        if (!hasPermissions || !hasLocationPermission) {
             permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
