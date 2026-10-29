@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.location.Location
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,6 +68,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -100,6 +106,10 @@ private fun RiderCamDashboard() {
     var recording by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Izinkan kamera dan mikrofon untuk mulai") }
     var cameraReady by remember { mutableStateOf(false) }
+    var hasLocationPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) }
+    var gpsLocation by remember { mutableStateOf<Location?>(null) }
+    var tripDistanceMeters by remember { mutableStateOf(0f) }
+    var maxSpeedKmh by remember { mutableStateOf(0f) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
     var hasPermissions by remember {
@@ -111,8 +121,9 @@ private fun RiderCamDashboard() {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        hasPermissions = result[Manifest.permission.CAMERA] == true &&
-            result[Manifest.permission.RECORD_AUDIO] == true
+        hasPermissions = (result[Manifest.permission.CAMERA] == true || ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) &&
+            (result[Manifest.permission.RECORD_AUDIO] == true || ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+        hasLocationPermission = result[Manifest.permission.ACCESS_FINE_LOCATION] == true || result[Manifest.permission.ACCESS_COARSE_LOCATION] == true || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         status = if (hasPermissions) "Menyiapkan kamera…" else "Izin kamera/mikrofon belum diberikan"
     }
     val previewView = remember {
@@ -124,7 +135,7 @@ private fun RiderCamDashboard() {
 
     LaunchedEffect(Unit) {
         if (!hasPermissions) {
-            permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+            permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
 
@@ -159,6 +170,38 @@ private fun RiderCamDashboard() {
             videoCapture = null
             cameraReady = false
             status = "Kamera gagal dibuka: ${error.localizedMessage ?: "periksa perangkat"}"
+        }
+    }
+
+
+    DisposableEffect(hasLocationPermission) {
+        if (!hasLocationPermission) {
+            onDispose { }
+        } else {
+            val client = LocationServices.getFusedLocationProviderClient(context)
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+                .setMinUpdateIntervalMillis(500L)
+                .build()
+            var previous: Location? = null
+            val callback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    val current = result.lastLocation ?: return
+                    val speed = if (current.hasSpeed()) current.speed * 3.6f else 0f
+                    gpsLocation = current
+                    maxSpeedKmh = maxOf(maxSpeedKmh, speed)
+                    previous?.let { old ->
+                        val delta = old.distanceTo(current)
+                        if (delta in 0.5f..100f && current.accuracy <= 35f) tripDistanceMeters += delta
+                    }
+                    previous = current
+                }
+            }
+            try {
+                client.requestLocationUpdates(request, callback, context.mainLooper)
+            } catch (_: SecurityException) {
+                hasLocationPermission = false
+            }
+            onDispose { client.removeLocationUpdates(callback) }
         }
     }
 
@@ -201,7 +244,7 @@ private fun RiderCamDashboard() {
                         Text(status, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(12.dp))
                         if (!hasPermissions) {
                             Button(onClick = {
-                                permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                                permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                             }) { Text("Izinkan Kamera") }
                         }
                     }
@@ -243,16 +286,16 @@ private fun RiderCamDashboard() {
                     Icon(Icons.Default.Speed, contentDescription = null, tint = Neon, modifier = Modifier.size(18.dp))
                     Text(" GPS SPEED", color = Muted, fontSize = 11.sp)
                 }
-                Text("--", color = Neon, fontSize = 44.sp, fontWeight = FontWeight.Black, lineHeight = 46.sp)
-                Text("km/h • GPS belum aktif", color = Muted, fontSize = 10.sp)
+                Text(gpsLocation?.let { if (it.hasSpeed()) "%.0f".format(Locale.US, it.speed * 3.6f) else "0" } ?: "--", color = Neon, fontSize = 44.sp, fontWeight = FontWeight.Black, lineHeight = 46.sp)
+                Text(if (gpsLocation == null) "km/h • menunggu GPS" else "km/h • GPS aktif", color = Muted, fontSize = 10.sp)
             }
             Column(
                 modifier = Modifier.weight(1f).background(Panel, RoundedCornerShape(16.dp)).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                TelemetryLine(Icons.Default.GpsFixed, "GPS", "Belum aktif")
+                TelemetryLine(Icons.Default.GpsFixed, "GPS", if (gpsLocation == null) "Mencari sinyal" else "Akurasi %.0f m".format(Locale.US, gpsLocation!!.accuracy))
                 TelemetryLine(Icons.Default.CameraAlt, "Kamera", if (rearCamera) "Belakang" else "Depan")
-                TelemetryLine(Icons.Default.Mic, "Status", if (cameraReady) "Siap merekam" else "Menunggu")
+                TelemetryLine(Icons.Default.Mic, "Ketinggian", gpsLocation?.let { if (it.hasAltitude()) "%.0f m".format(Locale.US, it.altitude) else "Tidak tersedia" } ?: "—")
             }
         }
 
@@ -319,7 +362,7 @@ private fun RiderCamDashboard() {
 
         Text(status, modifier = Modifier.fillMaxWidth(), color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
         Text(
-            "GPS overlay dan rekaman bersegmen otomatis belum diaktifkan pada tahap ini.",
+            "Jarak %.2f km  •  Maks %.0f km/h  •  Koordinat %s".format(Locale.US, tripDistanceMeters / 1000f, maxSpeedKmh, gpsLocation?.let { "%.5f, %.5f".format(Locale.US, it.latitude, it.longitude) } ?: "menunggu GPS"),
             modifier = Modifier.fillMaxWidth(), color = Muted, fontSize = 9.sp, textAlign = TextAlign.Center
         )
     }
