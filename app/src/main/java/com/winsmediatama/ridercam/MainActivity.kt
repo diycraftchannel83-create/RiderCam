@@ -2,6 +2,15 @@ package com.winsmediatama.ridercam
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.location.Location
@@ -10,7 +19,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraEffect
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.effects.OverlayEffect
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
@@ -119,6 +131,9 @@ private fun RiderCamDashboard() {
     var hasLocationPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) }
     var gpsLocation by remember { mutableStateOf<Location?>(null) }
     var gpsAvailable by remember { mutableStateOf(false) }
+    var batteryPercent by remember { mutableStateOf(100) }
+    var activeOverlayEffect by remember { mutableStateOf<OverlayEffect?>(null) }
+    val dashboardBitmap = remember(context) { BitmapFactory.decodeResource(context.resources, R.drawable.dashboard) }
     var tripDistanceMeters by remember { mutableStateOf(0f) }
     var maxSpeedKmh by remember { mutableStateOf(0f) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
@@ -141,6 +156,16 @@ private fun RiderCamDashboard() {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = battery?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = battery?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+            if (level >= 0 && scale > 0) batteryPercent = (level * 100 / scale).coerceIn(0, 100)
+            delay(30_000L)
         }
     }
 
@@ -180,7 +205,45 @@ private fun RiderCamDashboard() {
                 .build()
             val capture = VideoCapture.withOutput(recorder)
             val selector = if (rearCamera) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
-            provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+            activeOverlayEffect?.close()
+            val overlayEffect = OverlayEffect(
+                CameraEffect.PREVIEW or CameraEffect.VIDEO_CAPTURE,
+                0,
+                Handler(Looper.getMainLooper())
+            ) { error -> android.util.Log.e("RiderCam", "Dashboard overlay error", error) }
+            val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            overlayEffect.setOnDrawListener { frame ->
+                val canvas = frame.overlayCanvas
+                canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+                val target = Rect(0, 0, canvas.width, canvas.height)
+                canvas.drawBitmap(dashboardBitmap, null, target, bitmapPaint)
+
+                val scale = canvas.width / 1920f
+                val radius = 42f * scale
+                val top = 92f * scale
+                val leftX = 92f * scale
+                val rightX = canvas.width - leftX
+                val gpsOk = gpsLocation?.let { System.currentTimeMillis() - it.time <= 5000L } == true
+                val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = android.graphics.Color.argb(220, 5, 10, 12) }
+                val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 6f * scale; color = if (gpsOk) android.graphics.Color.rgb(114, 255, 36) else android.graphics.Color.rgb(255, 51, 77) }
+                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE; textAlign = Paint.Align.CENTER; textSize = 22f * scale; typeface = Typeface.create("sans-serif", Typeface.BOLD) }
+                canvas.drawCircle(leftX, top, radius, indicatorPaint)
+                canvas.drawCircle(leftX, top, radius, ringPaint)
+                canvas.drawText("GPS", leftX, top + 8f * scale, textPaint)
+                indicatorPaint.color = android.graphics.Color.argb(220, 5, 10, 12)
+                ringPaint.color = if (batteryPercent <= 15) android.graphics.Color.rgb(255, 51, 77) else android.graphics.Color.rgb(114, 255, 36)
+                canvas.drawCircle(rightX, top, radius, indicatorPaint)
+                canvas.drawCircle(rightX, top, radius, ringPaint)
+                canvas.drawText("${batteryPercent}%", rightX, top + 8f * scale, textPaint)
+                true
+            }
+            activeOverlayEffect = overlayEffect
+            val useCaseGroup = UseCaseGroup.Builder()
+                .addUseCase(preview)
+                .addUseCase(capture)
+                .addEffect(overlayEffect)
+                .build()
+            provider.bindToLifecycle(lifecycleOwner, selector, useCaseGroup)
             videoCapture = capture
             cameraReady = true
             status = "Kamera siap • target Full HD"
@@ -225,6 +288,7 @@ private fun RiderCamDashboard() {
 
     DisposableEffect(Unit) {
         onDispose {
+            activeOverlayEffect?.close()
             activeRecording?.stop()
             activeRecording = null
         }
